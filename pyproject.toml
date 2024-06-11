@@ -1,0 +1,23 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "pastelid_signer"
+version = "0.1.0"
+description = "Sign and verify messages with PastelID (Ed-448)"
+license = "MIT"
+authors = [{ name = "Jeffrey Emanuel", email = "jeff@pastel.network" }]
+readme = "README.md"
+repository = "https://github.com/Dicklesworthstone/pastelid_signer"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]

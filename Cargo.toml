@@ -1,0 +1,17 @@
+[package]
+name = "pastelid_signer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ed448-rust = "0.1.1"
+sodiumoxide = "0.2.7"
+config = "0.14.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rmp-serde = "1.0"
+hex = "0.4.3"
+
+[dependencies.pyo3]
+version = "0.21.2"
+features = ["extension-module"]
