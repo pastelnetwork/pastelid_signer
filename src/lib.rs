@@ -14,18 +14,25 @@ struct PastelSigner {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct SecureContainer {
-    version: u16,
-    timestamp: i64,
-    encryption: String,
-    secure_items: Vec<SecureItem>,
+struct PublicItem {
+    item_type: String,
+    data: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SecureItem {
-    r#type: String,
+    item_type: String,
     nonce: Vec<u8>,
     data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct SecureContainer {
+    version: u16,
+    timestamp: i64,
+    encryption: String,
+    public_items: Vec<PublicItem>,
+    secure_items: Vec<SecureItem>,
 }
 
 #[pymethods]
@@ -60,23 +67,24 @@ impl PastelSigner {
 
         // Deserialize the encrypted data
         let mut de = Deserializer::new(Cursor::new(encrypted_data));
-        let secure_container: SecureContainer = Deserialize::deserialize(&mut de)
-            .expect("Failed to deserialize secure container");
+        let secure_container: SecureContainer = match Deserialize::deserialize(&mut de) {
+            Ok(container) => container,
+            Err(e) => {
+                println!("Failed to deserialize secure container: {:?}", e);
+                panic!("Deserialization error");
+            }
+        };
+
+        println!("Deserialized secure container: {:?}", secure_container);
 
         // Extract the private key from the secure container
-        let private_key_data = secure_container.secure_items
+        let secure_item = secure_container.secure_items
             .iter()
-            .find(|item| item.r#type == "pkey_ed448")
-            .expect("Private key not found in the secure container")
-            .data
-            .clone();
+            .find(|item| item.item_type == "pkey_ed448")
+            .expect("Private key not found in the secure container");
 
-        // Get the nonce for the private key item
-        let nonce_slice = &secure_container.secure_items
-            .iter()
-            .find(|item| item.r#type == "pkey_ed448")
-            .expect("Private key nonce not found")
-            .nonce;
+        let private_key_data = &secure_item.data;
+        let nonce_slice = &secure_item.nonce;
 
         if nonce_slice.len() != xchacha20poly1305_ietf::NONCEBYTES {
             panic!("Invalid nonce length: expected {}, got {}", xchacha20poly1305_ietf::NONCEBYTES, nonce_slice.len());
