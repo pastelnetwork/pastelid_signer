@@ -5,8 +5,9 @@ use sodiumoxide::crypto::pwhash::{self, Salt, MEMLIMIT_INTERACTIVE, OPSLIMIT_INT
 use sodiumoxide::crypto::aead::xchacha20poly1305_ietf::{self, Nonce, Key};
 use std::fs;
 use serde::{Deserialize, Serialize};
-use rmp_serde::Deserializer;
-use std::io::Cursor;
+use rmp_serde::{Deserializer, Serializer};
+use std::io::{Cursor, Read};
+use byteorder::{BigEndian, ReadBytesExt};
 
 #[pyclass]
 struct PastelSigner {
@@ -15,12 +16,14 @@ struct PastelSigner {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct PublicItem {
+    #[serde(rename = "type")]
     item_type: String,
     data: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SecureItem {
+    #[serde(rename = "type")]
     item_type: String,
     nonce: Vec<u8>,
     data: Vec<u8>,
@@ -28,11 +31,21 @@ struct SecureItem {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SecureContainer {
-    version: u16,
-    timestamp: i64,
-    encryption: String,
-    public_items: Vec<PublicItem>,
+    version: Option<u16>,
+    timestamp: Option<i64>,
+    encryption: Option<String>,
     secure_items: Vec<SecureItem>,
+}
+
+impl Default for SecureContainer {
+    fn default() -> Self {
+        SecureContainer {
+            version: None,
+            timestamp: None,
+            encryption: None,
+            secure_items: Vec::new(),
+        }
+    }
 }
 
 #[pymethods]
@@ -65,9 +78,17 @@ impl PastelSigner {
         // Skip the header and extract the rest of the data
         let encrypted_data = &encrypted_data[header.len()..];
 
-        // Deserialize the encrypted data
-        let mut de = Deserializer::new(Cursor::new(encrypted_data));
-        let secure_container: SecureContainer = match Deserialize::deserialize(&mut de) {
+        // Read public items size and hash
+        let mut cursor = Cursor::new(encrypted_data);
+        let msgpack_public_items_size = cursor.read_u64::<BigEndian>().expect("Failed to read public items size");
+        let mut public_items_hash = [0u8; 32];
+        cursor.read_exact(&mut public_items_hash).expect("Failed to read public items hash");
+
+        println!("Public items size: {}", msgpack_public_items_size);
+        println!("Public items hash: {:?}", public_items_hash);
+
+        // Deserialize the secure items
+        let secure_container: SecureContainer = match rmp_serde::from_read(&mut cursor) {
             Ok(container) => container,
             Err(e) => {
                 println!("Failed to deserialize secure container: {:?}", e);

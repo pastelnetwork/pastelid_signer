@@ -2132,12 +2132,13 @@ config = "0.14.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 rmp-serde = "1.0"
+rmp = "0.8.14"
 hex = "0.4.3"
+byteorder = "1.5.0"
 
 [dependencies.pyo3]
 version = "0.21.2"
 features = ["extension-module"]
-
 
 ```
 
@@ -2150,8 +2151,9 @@ use sodiumoxide::crypto::pwhash::{self, Salt, MEMLIMIT_INTERACTIVE, OPSLIMIT_INT
 use sodiumoxide::crypto::aead::xchacha20poly1305_ietf::{self, Nonce, Key};
 use std::fs;
 use serde::{Deserialize, Serialize};
-use rmp_serde::Deserializer;
-use std::io::Cursor;
+use rmp_serde::{Deserializer, Serializer};
+use std::io::{Cursor, Read};
+use byteorder::{BigEndian, ReadBytesExt};
 
 #[pyclass]
 struct PastelSigner {
@@ -2159,11 +2161,10 @@ struct PastelSigner {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct SecureContainer {
-    version: u16,
-    timestamp: i64,
-    encryption: String,
-    secure_items: Vec<SecureItem>,
+struct PublicItem {
+    #[serde(rename = "type")]
+    item_type: String,
+    data: Vec<u8>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -2172,6 +2173,14 @@ struct SecureItem {
     item_type: String,
     nonce: Vec<u8>,
     data: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct SecureContainer {
+    version: u16,
+    timestamp: i64,
+    encryption: String,
+    secure_items: Vec<SecureItem>,
 }
 
 #[pymethods]
@@ -2204,13 +2213,17 @@ impl PastelSigner {
         // Skip the header and extract the rest of the data
         let encrypted_data = &encrypted_data[header.len()..];
 
-        // Print the raw data length and some of its content for debugging
-        println!("Raw data length: {}", encrypted_data.len());
-        println!("Raw data snippet: {:?}", &encrypted_data[..std::cmp::min(100, encrypted_data.len())]);
+        // Read public items size and hash
+        let mut cursor = Cursor::new(encrypted_data);
+        let msgpack_public_items_size = cursor.read_u64::<BigEndian>().expect("Failed to read public items size");
+        let mut public_items_hash = [0u8; 32];
+        cursor.read_exact(&mut public_items_hash).expect("Failed to read public items hash");
 
-        // Deserialize the encrypted data
-        let mut de = Deserializer::new(Cursor::new(encrypted_data));
-        let secure_container: SecureContainer = match Deserialize::deserialize(&mut de) {
+        println!("Public items size: {}", msgpack_public_items_size);
+        println!("Public items hash: {:?}", public_items_hash);
+
+        // Deserialize the secure items
+        let secure_container: SecureContainer = match rmp_serde::from_read(&mut cursor) {
             Ok(container) => container,
             Err(e) => {
                 println!("Failed to deserialize secure container: {:?}", e);
@@ -2310,7 +2323,6 @@ mod tests {
     }
 }
 
-
 ```
 
 Those test cases were made using pasteld's RPC methods, so I know they are right.
@@ -2320,8 +2332,18 @@ It's not working though-- see these errors:
 ```
 ❯ RUST_BACKTRACE=1 cargo test
    Compiling pastelid_signer v0.1.0 (/home/ubuntu/pastelid_signer)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
-     Running unittests src/lib.rs (target/debug/deps/pastelid_signer-ac67b9c6555f33f5)
+warning: unused imports: `Deserializer` and `Serializer`
+ --> src/lib.rs:8:17
+  |
+8 | use rmp_serde::{Deserializer, Serializer};
+  |                 ^^^^^^^^^^^^  ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: `pastelid_signer` (lib) generated 1 warning (run `cargo fix --lib -p pastelid_signer` to apply 1 suggestion)
+warning: `pastelid_signer` (lib test) generated 1 warning (1 duplicate)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.44s
+     Running unittests src/lib.rs (target/debug/deps/pastelid_signer-a69b03ee200bf1e0)
 
 running 1 test
 test tests::test_sign_and_verify ... FAILED
@@ -2331,10 +2353,10 @@ failures:
 ---- tests::test_sign_and_verify stdout ----
 Secure container file path: test_secure_container_file/jXXfLwrL7s7BQpm1uapzhKirt2HaRAse8Wru8pRLcGLonmZ996xNzAPJBjR6wfVXVzVFWn3NwA79gyAB5BptJ7
 Valid file header
-Raw data length: 5985
-Raw data snippet: [0, 0, 0, 0, 0, 0, 22, 24, 251, 13, 227, 74, 116, 50, 68, 232, 217, 241, 171, 186, 187, 126, 241, 43, 198, 224, 57, 252, 74, 56, 54, 133, 0, 149, 125, 146, 207, 254, 138, 214, 130, 167, 118, 101, 114, 115, 105, 111, 110, 1, 172, 112, 117, 98, 108, 105, 99, 95, 105, 116, 101, 109, 115, 145, 130, 164, 116, 121, 112, 101, 175, 112, 117, 98, 107, 101, 121, 95, 108, 101, 103, 114, 111, 97, 115, 116, 164, 100, 97, 116, 97, 197, 21, 226, 69, 120, 119, 89, 101, 90]
-Failed to deserialize secure container: Syntax("invalid type: integer `0`, expected struct SecureContainer")
-thread 'tests::test_sign_and_verify' panicked at src/lib.rs:72:17:
+Public items size: 5656
+Public items hash: [251, 13, 227, 74, 116, 50, 68, 232, 217, 241, 171, 186, 187, 126, 241, 43, 198, 224, 57, 252, 74, 56, 54, 133, 0, 149, 125, 146, 207, 254, 138, 214]
+Failed to deserialize secure container: Syntax("missing field `timestamp`")
+thread 'tests::test_sign_and_verify' panicked at src/lib.rs:84:17:
 Deserialization error
 stack backtrace:
    0: rust_begin_unwind
@@ -2342,11 +2364,11 @@ stack backtrace:
    1: core::panicking::panic_fmt
              at /rustc/b5b13568fb5da4ac988bde370008d6134d3dfe6c/library/core/src/panicking.rs:72:14
    2: pastelid_signer::PastelSigner::new
-             at ./src/lib.rs:72:17
+             at ./src/lib.rs:84:17
    3: pastelid_signer::tests::test_sign_and_verify
-             at ./src/lib.rs:145:22
+             at ./src/lib.rs:157:22
    4: pastelid_signer::tests::test_sign_and_verify::{{closure}}
-             at ./src/lib.rs:144:30
+             at ./src/lib.rs:156:30
    5: core::ops::function::FnOnce::call_once
              at /rustc/b5b13568fb5da4ac988bde370008d6134d3dfe6c/library/core/src/ops/function.rs:250:5
    6: core::ops::function::FnOnce::call_once
