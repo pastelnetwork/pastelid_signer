@@ -15,7 +15,7 @@ hex = "0.4.3"
 byteorder = "1.5.0"
 
 [dependencies.pyo3]
-version = "0.21.2"
+version = "0.24.1"
 features = ["extension-module"]
 
 [lib]
